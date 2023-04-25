@@ -1,4 +1,3 @@
-import cmath
 import os
 import re
 import statistics
@@ -6,13 +5,17 @@ import numpy as np
 from scipy.stats import variation, mannwhitneyu
 from hrvanalysis import remove_outliers, interpolate_nan_values, extract_features
 from pandas import DataFrame
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
+from sklearn.naive_bayes import MultinomialNB, ComplementNB
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.feature_selection import SelectKBest, chi2
-from sklearn.model_selection import train_test_split, cross_val_score, LeaveOneOut, KFold, GridSearchCV, StratifiedKFold
+from sklearn.model_selection import train_test_split, cross_val_score, LeaveOneOut, KFold, GridSearchCV, \
+    StratifiedKFold, RandomizedSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
 
 
 def get_spectral_characteristics(signal: list):
@@ -56,6 +59,7 @@ def get_spectral_characteristics(signal: list):
 
 
 def get_stress_index_from_signal(signal: list):
+
     # Мода сигнала
     mode = statistics.mode(signal) / 1000
     # Амплитуда моды сигнала
@@ -123,8 +127,7 @@ def gen_dataset():
 
 def get_dataframe(dataset: dict):
     column_names = ['cfs', 'SI-a', 'LF-a', 'HF-a', 'LF/HF-a', 'VLF-a', 'TP-a', 'SI-b', 'LF-b', 'HF-b', 'LF/HF-b',
-                    'VLF-b',
-                    'TP-b', 'SI-c', 'LF-c', 'HF-c', 'LF/HF-c', 'VLF-c', 'TP-c']
+                    'VLF-b', 'TP-b', 'SI-c', 'LF-c', 'HF-c', 'LF/HF-c', 'VLF-c', 'TP-c']
     df = DataFrame.from_dict(dataset, orient='index', columns=column_names)
     return df
 
@@ -136,49 +139,6 @@ def normalize_data_frame(df: DataFrame):
     # Применение MinMaxScaler к каждой колонке отдельно
     for column in df.columns:
         df[column] = scaler.fit_transform(df[[column]])
-
-
-def homogen_by_wilcoxon(x: list, y: list):
-    m = len(x)
-    n = len(y)
-
-    # Если длина первой выборки больше длины второй, то меняем их местами
-    if m > n:
-        z = x
-        x = y
-        y = z
-
-    x = [[val, 1] for val in x]
-    y = [[val, 2] for val in y]
-
-    d = x + y
-    d = sorted(d, key=lambda el: el[0])
-    for i in range(len(d)):
-        d[i].append(i + 1)
-
-    same = dict()
-    for el in d:
-        if same.__contains__(el[0]):
-            same[el[0]].append(el[2])
-        else:
-            same[el[0]] = [el[2]]
-
-    for el in d:
-        values = same[el[0]]
-        el[2] = np.mean(values)
-
-    x_ranks = []
-    for el in d:
-        if el[1] == 1:
-            x_ranks.append(el[2])
-    w = sum(x_ranks)
-
-    INVERSE_FUNCTION_VALUE = 1.959964
-
-    w_left = abs((m * (m + n + 1) - 1) / 2 - INVERSE_FUNCTION_VALUE * cmath.sqrt(m * n * (m + n + 1) / 12))
-    w_right = m * (m + n + 1) - w_left
-
-    return w_left <= w <= w_right
 
 
 def whitney_feature_selection(df: DataFrame):
@@ -203,6 +163,7 @@ def whitney_feature_selection(df: DataFrame):
 
 
 def save_the_most_important_features(df: DataFrame, k: int):
+
     label = df["cfs"]
     df_without_labels = df.drop("cfs", axis=1, inplace=False)
     normalize_data_frame(df_without_labels)
@@ -210,6 +171,7 @@ def save_the_most_important_features(df: DataFrame, k: int):
     k_best = SelectKBest(k=k, score_func=chi2)
     k_best.fit_transform(df_without_labels, label)
     k_best_features = k_best.get_feature_names_out()
+    print(k_best_features)
 
     for column in df:
         if column not in k_best_features and column != 'cfs':
@@ -222,14 +184,13 @@ def split_dataframe(df: DataFrame):
 
     return train_test_split(
         df, labels,
-        test_size=0.2,
+        test_size=0.25,
         random_state=42,
         stratify=labels
     )
 
 
 def use_knn(X_train, X_test, y_train, y_test):
-
     clf = KNeighborsClassifier(n_neighbors=3, leaf_size=1, weights='distance')
     pipeline = Pipeline([('scaler', MinMaxScaler()), ('knn', clf)])
 
@@ -237,7 +198,6 @@ def use_knn(X_train, X_test, y_train, y_test):
 
     scores = []
     for train_index, test_index in loo.split(X_train, y_train):
-
         fold_X_train, fold_X_test = X_train.iloc[train_index], X_train.iloc[test_index]
         fold_y_train, fold_y_test = y_train[train_index], y_train[test_index]
 
@@ -251,20 +211,14 @@ def use_knn(X_train, X_test, y_train, y_test):
     print(f'Средний скор модели на кросс-валидации: {round(float(np.mean(scores)), 2)}')
     print(f'Cкор на тесте: {round(pipeline.score(X_test, y_test), 2)}')
 
-    # scores = cross_val_score(pipeline, X_train, y_train, cv=loo, scoring='accuracy')
-    # pipeline.fit(X_train, y_train)
-    #
-    # score_in_test = pipeline.score(X_test, y_test)
-    # print(f'Скор на тесте: {round(score_in_test, 2)}')
-
-    # knn_params = {'knn__n_neighbors': list(range(1, 20, 2)),
+    # params = {'knn__n_neighbors': list(range(1, 20, 2)),
     #               'knn__weights': ['uniform', 'distance'],
     #               'knn__algorithm': ['auto', 'ball_tree', 'kd_tree', 'brute'],
     #               'knn__leaf_size': list(range(1, 10)),
     #               'knn__metric': ['minkowski', 'cityblock', 'euclidean', 'l1', 'l2', 'manhattan']}
     #
     # grid_pipeline = GridSearchCV(estimator=pipeline,
-    #                              param_grid=knn_params,
+    #                              param_grid=params,
     #                              cv=loo,
     #                              scoring='accuracy',
     #                              return_train_score=True,
@@ -275,7 +229,6 @@ def use_knn(X_train, X_test, y_train, y_test):
 
 
 def use_svm(X_train, X_test, y_train, y_test):
-
     clf = SVC(C=4, kernel='linear', probability=True, random_state=42)
     pipeline = Pipeline([('scaler', MinMaxScaler()), ('svm', clf)])
 
@@ -283,7 +236,6 @@ def use_svm(X_train, X_test, y_train, y_test):
 
     scores = []
     for train_index, test_index in loo.split(X_train, y_train):
-
         fold_X_train, fold_X_test = X_train.iloc[train_index], X_train.iloc[test_index]
         fold_y_train, fold_y_test = y_train[train_index], y_train[test_index]
 
@@ -313,6 +265,171 @@ def use_svm(X_train, X_test, y_train, y_test):
     # print(grid_pipeline.best_params_)
 
 
+def use_polynom_bayes(X_train, X_test, y_train, y_test):
+
+    clf = MultinomialNB(alpha=0, fit_prior=True, force_alpha=True)
+    pipeline = Pipeline([('scaler', MinMaxScaler()), ('nb', clf)])
+
+    loo = LeaveOneOut()
+
+    scores = []
+    for train_index, test_index in loo.split(X_train, y_train):
+        fold_X_train, fold_X_test = X_train.iloc[train_index], X_train.iloc[test_index]
+        fold_y_train, fold_y_test = y_train[train_index], y_train[test_index]
+
+        pipeline.fit(fold_X_train, fold_y_train)
+
+        y_pred = pipeline.predict(fold_X_test)
+        score = accuracy_score(fold_y_test, y_pred)
+
+        scores.append(score)
+
+    print(f'Средний скор модели на кросс-валидации: {round(float(np.mean(scores)), 2)}')
+    print(f'Cкор на тесте: {round(pipeline.score(X_test, y_test), 2)}')
+
+    # params = {'nb__alpha': [a * 0.1 for a in range(0, 11)],
+    #               'nb__force_alpha': [True, False],
+    #               'nb__fit_prior': [True, False]}
+    #
+    # grid_pipeline = GridSearchCV(estimator=pipeline,
+    #                              param_grid=params,
+    #                              cv=loo,
+    #                              scoring='accuracy',
+    #                              return_train_score=True,
+    #                              verbose=2,
+    #                              n_jobs=-1)
+    # grid_pipeline.fit(X_train, y_train)
+    #
+    # print(grid_pipeline.best_params_)
+
+
+def use_complement_bayes(X_train, X_test, y_train, y_test):
+    clf = ComplementNB(alpha=0, fit_prior=True, force_alpha=True)
+    pipeline = Pipeline([('scaler', MinMaxScaler()), ('nb', clf)])
+
+    loo = LeaveOneOut()
+
+    scores = []
+    for train_index, test_index in loo.split(X_train, y_train):
+        fold_X_train, fold_X_test = X_train.iloc[train_index], X_train.iloc[test_index]
+        fold_y_train, fold_y_test = y_train[train_index], y_train[test_index]
+
+        pipeline.fit(fold_X_train, fold_y_train)
+
+        y_pred = pipeline.predict(fold_X_test)
+        score = accuracy_score(fold_y_test, y_pred)
+
+        scores.append(score)
+
+    print(f'Средний скор модели на кросс-валидации: {round(float(np.mean(scores)), 2)}')
+    print(f'Cкор на тесте: {round(pipeline.score(X_test, y_test), 2)}')
+
+    # params = {'nb__alpha': [a * 0.1 for a in range(0, 11)],
+    #           'nb__force_alpha': [True, False],
+    #           'nb__fit_prior': [True, False],
+    #           'nb__norm': [True, False]}
+    #
+    # grid_pipeline = GridSearchCV(estimator=pipeline,
+    #                              param_grid=params,
+    #                              cv=loo,
+    #                              scoring='accuracy',
+    #                              verbose=2,
+    #                              n_jobs=-1)
+    # grid_pipeline.fit(X_train, y_train)
+    #
+    # print(grid_pipeline.best_params_)
+
+
+def use_decision_tree(X_train, X_test, y_train, y_test):
+
+    clf = DecisionTreeClassifier(random_state=42, criterion='entropy', max_features='sqrt')
+    pipeline = Pipeline([('scaler', MinMaxScaler()), ('tree', clf)])
+
+    loo = LeaveOneOut()
+
+    scores = []
+    for train_index, test_index in loo.split(X_train, y_train):
+
+        fold_X_train, fold_X_test = X_train.iloc[train_index], X_train.iloc[test_index]
+        fold_y_train, fold_y_test = y_train[train_index], y_train[test_index]
+
+        pipeline.fit(fold_X_train, fold_y_train)
+
+        y_pred = pipeline.predict(fold_X_test)
+        score = f1_score(fold_y_test, y_pred)
+
+        scores.append(score)
+
+    print(f'Средний скор модели на кросс-валидации: {round(float(np.mean(scores)), 2)}')
+    y_pred = pipeline.predict(X_test)
+    print(f'Cкор на тесте: {round(f1_score(y_test, y_pred), 2)}')
+
+    # params = {'tree__criterion': ['gini', 'entropy', 'log_loss'],
+    #           'tree__max_depth': [None, 2, 4, 6, 8, 10],
+    #           'tree__max_features': [None, 'sqrt', 'log2', 0.2, 0.4, 0.6, 0.8],
+    #           'tree__splitter': ['best', 'random']}
+    #
+    # grid_pipeline = GridSearchCV(estimator=pipeline,
+    #                              param_grid=params,
+    #                              cv=loo,
+    #                              scoring='accuracy',
+    #                              verbose=2,
+    #                              n_jobs=-1)
+    # grid_pipeline.fit(X_train, y_train)
+    # print(grid_pipeline.best_params_)
+
+
+def use_rfc(X_train, X_test, y_train, y_test):
+
+    clf = RandomForestClassifier(random_state=42, n_jobs=-1, n_estimators=9)
+    pipeline = Pipeline([('scaler', MinMaxScaler()), ('rfc', clf)])
+
+    loo = LeaveOneOut()
+    k_fold = StratifiedKFold(n_splits=10)
+
+    scores = []
+    for train_index, test_index in loo.split(X_train, y_train):
+
+        fold_X_train, fold_X_test = X_train.iloc[train_index], X_train.iloc[test_index]
+        fold_y_train, fold_y_test = y_train[train_index], y_train[test_index]
+
+        pipeline.fit(fold_X_train, fold_y_train)
+
+        y_pred = pipeline.predict(fold_X_test)
+        score = accuracy_score(fold_y_test, y_pred)
+
+        scores.append(score)
+
+    print(f'Средний скор модели на кросс-валидации: {round(float(np.mean(scores)), 2)}')
+    print(f'Cкор на тесте: {round(pipeline.score(X_test, y_test), 2)}')
+
+    # params = {'rfc__random_state': [42],
+    #           'rfc__n_estimators': [9]
+    #           'rfc__bootstrap': [False],
+    #           'rfc__max_depth': [1],
+    #           'rfc__max_features': [1],
+    #           'rfc__min_samples_leaf': [1],
+    #           'rfc__min_samples_split': [2],
+    #           'rfc__criterion': ['gini'],
+    #           'rfc__max_leaf_nodes': [3],
+    #           'rfc__oob_score': [False],
+    #           'rfc__class_weight': ['balanced'],
+    #           'rfc__ccp_alpha': [0],
+    #           'rfc__min_impurity_decrease': [0],
+    #           'rfc__max_samples': [None],
+    #           'rfc__min_weight_fraction_leaf': [0]
+    #           }
+    #
+    # grid_pipeline = GridSearchCV(estimator=pipeline,
+    #                              param_grid=params,
+    #                              cv=loo,
+    #                              scoring='accuracy',
+    #                              verbose=2,
+    #                              n_jobs=-1)
+    # grid_pipeline.fit(X_train, y_train)
+    # print(grid_pipeline.best_params_)
+
+
 # Генерация датасета
 dataset = gen_dataset()
 # Генерация датафрейма из датасета
@@ -323,9 +440,9 @@ not_important_features = whitney_feature_selection(df)
 df.drop(not_important_features, axis=1, inplace=True)
 
 # Отбор лучших для классификации признаков
-save_the_most_important_features(df, 15)
+save_the_most_important_features(df, 7)
 
 # Делю датафрейм на тренировочный и тестовый
 X_train, X_test, y_train, y_test = split_dataframe(df)
 
-use_svm(X_train, X_test, y_train, y_test)
+# use_rfc(X_train, X_test, y_train, y_test)

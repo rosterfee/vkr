@@ -440,7 +440,7 @@ not_important_features = whitney_feature_selection(df)
 df.drop(not_important_features, axis=1, inplace=True)
 
 # Отбор лучших для классификации признаков
-save_the_most_important_features(df, 7)
+save_the_most_important_features(df, 15)
 
 # Делю датафрейм на тренировочный и тестовый
 X_train, X_test, y_train, y_test = split_dataframe(df)

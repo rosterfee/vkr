@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope&family=Montserrat:ital,wght@0,200;0,300;0,500;0,600;0,700;1,200;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="static/style.css" />
+</head>
+<body>
+<div class="main">
+    <div class="container">
+        <div class="container_center">
+            <form class="form" method="post" enctype="multipart/form-data">
+
+                <h1 class="form_title">Заполните форму</h1>
+
+                <div class="input_block">
+                    <span class="input_block-text">Результаты проб</span>
+                    <label class="input-file">
+                        <span id="trial_rest_text" class="input-file-text"></span>
+                        <input id="trial_rest" type="file" name="file" multiple placeholder="Проба в покое">
+                        <span class="input-file-btn">Выбрать файлы</span>
+                    </label>
+                </div>
+
+                <div class="form_btn" onclick="uploadFiles()">Загрузить</div>
+
+                <div class="result_block">
+                    <span id="result" class="result_text">Результат предсказания: </span>
+                </div>
+            </form>
+
+        </div>
+    </div>
+</div>
+</body>
+
+<script>
+    function uploadFiles() {
+
+      const responseText = document.getElementById("result");
+      responseText.innerText = 'Результат предсказания: '
+
+      const filesInput = document.getElementById("trial_rest");
+
+      const files = filesInput.files;
+
+      const formData = new FormData();
+
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+      }
+
+      fetch("/predict", {
+        method: "POST",
+        body: formData
+      })
+        .then(response => response.json())
+        .then(data => {
+          // Обработка полученного ответа
+          console.log(data)
+          if (data.result === '1') {
+            responseText.textContent += "МЭ/СХУ";
+          } else {
+            responseText.textContent += "Здоровый";
+          }
+        })
+        .catch(error => {
+          console.error("Ошибка при отправке файлов:", error);
+        });
+    }
+  </script>
+
+<script type="text/javascript">
+    const trial_rest = document.getElementById('trial_rest')
+    const trial_12 = document.getElementById('trial_12')
+    const trial_6 = document.getElementById('trial_6')
+
+    trial_rest.addEventListener('change', function() {
+        const file = trial_rest.files[0]
+
+        const trial_rest_text = document.getElementById('trial_rest_text')
+        trial_rest_text.textContent = file.name
+    })
+
+    trial_12.addEventListener('change', function() {
+        const file = trial_rest.files[0]
+
+        const trial_12_text = document.getElementById('trial_12_text')
+        trial_12_text.textContent = file.name
+    })
+
+    trial_6.addEventListener('change', function() {
+        const file = trial_rest.files[0]
+
+        const trial_6_text = document.getElementById('trial_6_text')
+        trial_6_text.textContent = file.name
+    })
+</script>
+</html>
